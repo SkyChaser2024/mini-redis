@@ -1,0 +1,17 @@
+[package]
+name = "mini-redis"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "3.2.23", features = ["derive"] } # 引入 clap, 并启用 derive 功能(注意版本问题)
+tokio = { version = "1", features = ["full"] } # 启用 tokio 全部功能
+tokio-stream = "0.1"
+dotenv = "0.15.0" # 用来读取 '.env' 配置文件中的信息
+log = "0.4" # 记录日志
+thiserror = "1.0.38" # 用于 error.rs
+bytes = "1"
+atoi = "2.0.0"
+async-stream = "0.3.0"
