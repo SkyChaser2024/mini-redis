@@ -1,4 +1,3 @@
-// 和 server.rs 比较相似
 use clap::Parser;
 use dotenv::dotenv;
 use log::debug;
@@ -83,12 +82,12 @@ async fn main() -> Result<(), MiniRedisClientError> {
             message,
         } => {
             client.publish(&channel, message).await?;
-            println!("publish Ok");
+            println!("publish ok");
         }
 
         Command::Subscribe { channels } => {
             if channels.is_empty() {
-                return Err(MiniRedisConnectionError::InvalidArgument("channel(s) must be provided".into()).into());
+                return Err(MiniRedisConnectionError::InvalidArgument("channel(s) must be provided".into(),).into());
             }
 
             let mut subscriber = client.subscribe(channels).await?;

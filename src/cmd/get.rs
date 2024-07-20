@@ -61,7 +61,8 @@ impl Get {
         dst: &mut Connection,
     ) -> Result<(), MiniRedisConnectionError> {
         let response = if let Some(value) = db.get(&self.key) {
-            Frame::Bulk(Bytes::from(value))
+            // Frame::Bulk(Bytes::from(value))
+            Frame::Bulk(value)
         } else {
             Frame::Null
         };
