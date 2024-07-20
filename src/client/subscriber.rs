@@ -20,7 +20,7 @@ pub struct Message {
 }
 
 impl Subscriber {
-    pub async fn subcribe(&mut self, channels: &[String]) -> Result<(), MiniRedisConnectionError> {
+    pub async fn subscribe(&mut self, channels: &[String]) -> Result<(), MiniRedisConnectionError> {
         self.client.subscribe_cmd(channels).await?;
 
         self.subscribed_channels
@@ -94,7 +94,10 @@ impl Subscriber {
 
                         self.subscribed_channels.retain(|c| *channel != &c[..]);
                         if self.subscribed_channels.len() != len - 1 {
-                            return Err(MiniRedisConnectionError::InvalidArgument(
+                            // return Err(MiniRedisConnectionError::InvalidArgument(
+                            //     response.to_string(),
+                            // ));
+                            return Err(MiniRedisConnectionError::CommandExecute(
                                 response.to_string(),
                             ));
                         }

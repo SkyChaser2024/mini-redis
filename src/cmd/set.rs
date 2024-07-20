@@ -86,7 +86,7 @@ impl Set {
             }
             // invalid，暂时不支持其他类型
             Ok(s) => {
-                warn!("invalid set command argument: {:?}", s);
+                warn!("invalid set command argument: {}", s);
                 return Err(MiniRedisParseError::Parse(
                     "currently `SET` only support the expiration option".into(),
                 ));

@@ -23,9 +23,7 @@ impl Client {
         match response {
             Some(Frame::Error(msg)) => Err(MiniRedisConnectionError::CommandExecute(msg)),
             Some(frame) => Ok(frame),
-            None => {
-                Err(MiniRedisConnectionError::Disconnect)
-            }
+            None => Err(MiniRedisConnectionError::Disconnect),
         }
     }
 
@@ -41,7 +39,10 @@ impl Client {
         }
     }
 
-    pub(crate) async fn subscribe_cmd(&mut self, channels: &[String]) -> Result<(), MiniRedisConnectionError> {
+    pub(crate) async fn subscribe_cmd(
+        &mut self,
+        channels: &[String],
+    ) -> Result<(), MiniRedisConnectionError> {
         let frame = Subscribe::new(channels).into_frame()?;
         debug!("subcribe request: {:?}", frame);
 
@@ -52,16 +53,22 @@ impl Client {
             match response {
                 Frame::Array(ref frame) => match frame.as_slice() {
                     [subscribe, schannel, ..]
-                        if *subscribe == "subscribe" && *schannel == channel => {
-                            debug!("subscribe channel: {} successfully", channel);
-                        }
+                        if *subscribe == "subscribe" && *schannel == channel =>
+                    {
+                        debug!("subscribe channel: {} success", channel);
+                    }
                     _ => {
-                        error!("subscribe channel failed, response: {:?}", response);
-                        return Err(MiniRedisConnectionError::CommandExecute(response.to_string()));
+                        error!("subscribe channel failed, response: {}", response);
+                        return Err(MiniRedisConnectionError::CommandExecute(
+                            response.to_string(),
+                        ));
                     }
                 },
                 frame => {
-                    error!("subscribe channel failed, response frame tyep not match: {:?}", frame);
+                    error!(
+                        "subscribe channel failed, response frame tyep not match: {}",
+                        frame
+                    );
                     return Err(MiniRedisConnectionError::InvalidFrameType);
                 }
             };
@@ -98,11 +105,20 @@ impl Client {
         self.set_cmd(Set::new(key, value, None)).await
     }
 
-    pub async fn set_expire(&mut self, key: &str, value: Bytes, epxiration: Duration) -> Result<(), MiniRedisConnectionError> {
+    pub async fn set_expire(
+        &mut self,
+        key: &str,
+        value: Bytes,
+        epxiration: Duration,
+    ) -> Result<(), MiniRedisConnectionError> {
         self.set_cmd(Set::new(key, value, Some(epxiration))).await
     }
 
-    pub async fn publish(&mut self, channel: &str, message: Bytes) -> Result<u64, MiniRedisConnectionError> {
+    pub async fn publish(
+        &mut self,
+        channel: &str,
+        message: Bytes,
+    ) -> Result<u64, MiniRedisConnectionError> {
         let frame = Publish::new(channel, message).into_frame()?;
         debug!("publish request: {:?}", frame);
 
@@ -114,12 +130,14 @@ impl Client {
         }
     }
 
-    pub async fn subscribe(mut self, channels: Vec<String>) -> Result<Subscriber, MiniRedisConnectionError> {
+    pub async fn subscribe(
+        mut self,
+        channels: Vec<String>,
+    ) -> Result<Subscriber, MiniRedisConnectionError> {
         self.subscribe_cmd(&channels).await?;
         Ok(Subscriber {
             client: self,
             subscribed_channels: channels,
         })
     }
-
 }
