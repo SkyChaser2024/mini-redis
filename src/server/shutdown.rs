@@ -1,4 +1,4 @@
-use tokio::sync::broadcast;
+use tokio::sync::broadcast; // 引入 tokio 库中的 broadcast 模块，用于实现广播通道
 
 /// 监听服务器 shutdown 信号。
 ///
@@ -47,7 +47,7 @@ impl Shutdown {
         if self.is_shutdown {
             return;
         }
-        
+
         // 由于仅发送一个值，因此无法接收 "lag error"
         self.notify.recv().await.ok();
         // 以及收到了 shutdown 信号

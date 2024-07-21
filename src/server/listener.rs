@@ -1,22 +1,24 @@
+// 使用标准库中的 Arc 和 Duration
 use std::sync::Arc;
 use std::time::Duration;
 
-use log::{error, info};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{broadcast, mpsc, Semaphore};
-use tokio::time;
+use log::{error, info}; // 使用 log 库记录信息和错误
+use tokio::net::{TcpListener, TcpStream}; // 使用 tokio 异步网络编程库中的 TcpListener 和 TcpStream
+use tokio::sync::{broadcast, mpsc, Semaphore}; // 使用 tokio 同步原语：broadcast（广播），mpsc（消息传递），Semaphore（信号量）
+use tokio::time; // 使用 tokio 的时间处理工具
 
-use crate::connection::connect::Connection;
-use crate::error::MiniRedisConnectionError;
-use crate::server::handler::Handler;
-use crate::server::shutdown::Shutdown;
-use crate::storage::db::DbDropGuard;
+// 引入项目内部模块
+use crate::connection::connect::Connection; // 连接处理
+use crate::error::MiniRedisConnectionError; // 错误定义
+use crate::server::handler::Handler; // 连接处理器
+use crate::server::shutdown::Shutdown; // 优雅关闭处理
+use crate::storage::db::DbDropGuard; // 数据库守护
 
 /// `Listener` 结构体负责监听TCP连接，并管理与每个连接相关的资源。
 #[derive(Debug)]
 pub(crate) struct Listener {
-    pub(crate) listener: TcpListener, // 监听 TCP 连接
-    pub(crate) db_holder: DbDropGuard, //内部存储数据库
+    pub(crate) listener: TcpListener,                    // 监听 TCP 连接
+    pub(crate) db_holder: DbDropGuard,                   //内部存储数据库
     pub(crate) limit_conn: Arc<Semaphore>, // 使用信号量 Semaphore 实现的连接令牌，当超过了最大连接数，则需要等待其他连接释放后才能创建新的连接
     pub(crate) notify_shutdown: broadcast::Sender<()>, // 通知所有 TCP 服务器 shutdown 信号
     pub(crate) shutdown_complete_tx: mpsc::Sender<()>, // 用于发送服务器 shutdown 完成信号的发送器
@@ -39,24 +41,20 @@ impl Listener {
         // 等待 permit 可用
         //
         // `acquire_owned` 返回与信号量绑定的许可证。
-        // 当许可证值被删除时，它会自动返回
-        // 到信号量。
+        // 当许可证值被删除时，它会自动返回给信号量。
         //
         // 当信号量已关闭时，`acquire_owned()` 返回 `Err`。我们永远不会关闭信号量，因此 `unwrap()` 是安全的。
         loop {
-            let permit = self
-                .limit_conn
-                .clone()
-                .acquire_owned()
-                .await
-                .unwrap();
-            
+            let permit = self.limit_conn.clone().acquire_owned().await.unwrap();
+
             // 接收一个连接（调用下面实现的 accept 函数）
             let socket = self.accept().await?;
-            
+
             // 创建一个新的 Handler 来处理连接
             let mut handler = Handler {
+                // 获取共享数据库的句柄
                 db: self.db_holder.db(),
+                // 初始化连接状态。这分配了读/写缓冲区以执行 redis 协议帧解析
                 conn: Connection::new(socket),
                 // shutdown 信号通知
                 shutdown: Shutdown::new(self.notify_shutdown.subscribe()),
@@ -64,7 +62,7 @@ impl Listener {
                 _shutdown_complete: self.shutdown_complete_tx.clone(),
             };
 
-            // 生成一个新的任务来处理连接
+            // 生成一个新的任务来处理连接，异步并发执行
             tokio::spawn(async move {
                 if let Err(err) = handler.run().await {
                     error!("connection error: {:?}", err);
@@ -83,6 +81,7 @@ impl Listener {
     async fn accept(&mut self) -> Result<TcpStream, MiniRedisConnectionError> {
         let mut backoff = 1;
         loop {
+            // 执行接受操作。如果成功接受套接字，则返回它。否则，保存错误。
             match self.listener.accept().await {
                 Ok((socket, _)) => {
                     return Ok(socket);
@@ -91,8 +90,7 @@ impl Listener {
                     if backoff > 64 {
                         error!("Accept has failed too many times. Error: {}", err);
                         return Err(err.into());
-                    }
-                    else {
+                    } else {
                         error!("failed to accept socket. Error: {}", err);
                     }
                 }
@@ -100,7 +98,7 @@ impl Listener {
 
             // 等待一段时间后重试，时间随重试次数指数增长
             time::sleep(Duration::from_secs(backoff)).await;
-            
+
             // double
             backoff *= 2;
         }

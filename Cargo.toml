@@ -1,9 +1,18 @@
 [package]
 name = "mini-redis"
 version = "0.1.0"
-edition = "2021"
+edition = "2018"
+description = "A mini-redis learn from tokio."
+repository = "https://github.com/SkyChaser2024/mini-redis"
+license-file = "LICENSE"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "mini-redis-cli"
+path = "src/bin/cli.rs"
+
+[[bin]]
+name = "mini-redis-server"
+path = "src/bin/server.rs"
 
 [dependencies]
 clap = { version = "3.2.23", features = ["derive"] } # 引入 clap, 并启用 derive 功能(注意版本问题)

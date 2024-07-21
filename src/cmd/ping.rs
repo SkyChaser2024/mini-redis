@@ -1,18 +1,21 @@
+use bytes::Bytes; // 引入 bytes 库中的 Bytes 类型，用于处理原始二进制数据
+use log::debug; // 引入 log 库的 debug 宏，用于输出调试信息
+
+// 引入本项目内的模块，用于处理连接、帧解析和错误处理
 use crate::connection::connect::Connection;
 use crate::connection::frame::Frame;
 use crate::connection::parse::Parse;
 use crate::error::{MiniRedisConnectionError, MiniRedisParseError};
-use bytes::Bytes;
-use log::debug;
 
 /// 表示一个 Ping 操作的结构体。
 ///
 /// 包含一个可选的 `Bytes` 类型的消息。如果没有提供参数 `msg`，则返回 PONG，否者返回参数的副本
 /// 作为 bulk 返回。
 ///
-/// 此命令主要用于测试连接是否有效。
+/// 此命令主要用于测试连接是否有效，或者测量延迟。
 #[derive(Debug, Default)]
 pub struct Ping {
+    // 可选的消息，如果提供，则在响应中返回该消息
     msg: Option<String>,
 }
 
@@ -58,13 +61,13 @@ impl Ping {
 
         debug!("ping cmd applied response: {}", response);
 
-        // 将 response 写入 dst
+        // 将 response 写入 dst（客户端）
         dst.write_frame(&response).await?;
 
         Ok(())
     }
 
-    /// 将 `PING` 操作转换为用于网络传输的 `Frame` 格式。
+    /// 将 `PING` 命令转换为用于网络传输的 `Frame` 格式，主要为客户端使用。
     ///
     /// # 返回值
     ///

@@ -13,6 +13,7 @@ use crate::storage::traits::KvStore;
 /// 如果 key 不存在，则返回特殊值 nil。如果 key 中存储的值不是字符串，则返回错误，因为 GET 仅处理字符串值。
 #[derive(Debug)]
 pub struct Get {
+    /// 要获取的键的名称
     key: String,
 }
 
@@ -60,9 +61,12 @@ impl Get {
         db: &Db,
         dst: &mut Connection,
     ) -> Result<(), MiniRedisConnectionError> {
+        // 从共享数据库状态中获取值
         let response = if let Some(value) = db.get(&self.key) {
-            Frame::Bulk(Bytes::from(value))
+            // 如果有值，则以 "bulk" 格式写入客户端。
+            Frame::Bulk(value)
         } else {
+            // 如果没有值，则写入 `Null`。
             Frame::Null
         };
 
