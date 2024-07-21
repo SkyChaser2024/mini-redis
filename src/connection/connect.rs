@@ -8,72 +8,54 @@ use tokio::net::TcpStream;
 use crate::connection::frame::Frame;
 use crate::error::{MiniRedisConnectionError, MiniRedisParseError};
 
-/// Send and receive `Frame` values from a remote peer.
+//// 从远程对等方发送和接收 `Frame` 值。
 ///
-/// When implementing networking protocols, a message on that protocol is
-/// often composed of several smaller messages known as frames. The purpose of
-/// `Connection` is to read and write frames on the underlying `TcpStream`.
+/// 在实现网络协议时，协议中的消息通常由几个较小的消息组成，称为帧。`Connection` 的目的是在底层的 `TcpStream` 上读取和写入帧。
 ///
-/// To read frames, the `Connection` uses an internal buffer, which is filled
-/// up until there are enough bytes to create a full frame. Once this happens,
-/// the `Connection` creates the frame and returns it to the caller.
+/// 为了读取帧，`Connection` 使用内部缓冲区，直到有足够的字节来创建一个完整的帧。一旦完成，`Connection` 创建帧并将其返回给调用者。
 ///
-/// When sending frames, the frame is first encoded into the write buffer.
-/// The contents of the write buffer are then written to the socket.
+/// 当发送帧时，帧首先被编码到写缓冲区中。然后，写缓冲区的内容被写入到套接字中。
 #[derive(Debug)]
 pub struct Connection {
-    /// The `TcpStream`. It is decorated with a `BufWriter`, which provides write
-    /// level buffering. The `BufWriter` implementation provided by Tokio is
-    /// sufficient for our needs.
+    /// `TcpStream`。它被 `BufWriter` 装饰，提供写入级别的缓冲。
+    /// Tokio 提供的 `BufWriter` 实现满足我们的需求。
     stream: BufWriter<TcpStream>,
 
-    // The buffer for reading frames.
+    /// 读取帧的缓冲区。
     buffer: BytesMut,
 }
 
 impl Connection {
-    /// Create a new `Connection`, backed by `socket`. Read and write buffers
-    /// are initialized.
+    /// 创建一个新的 `Connection` 实例。
+    ///
+    /// # 参数
+    /// * `socket` - 一个已经建立的 TCP 连接。
+    ///
+    /// # 返回
+    /// 返回一个包含缓冲区和流的 `Connection` 实例。
     pub fn new(socket: TcpStream) -> Connection {
         Connection {
+            // 使用 BufWriter 包装 TcpStream 以提供写缓冲功能。
             stream: BufWriter::new(socket),
-            // Default to a 4KB read buffer. For the use case of mini redis,
-            // this is fine. However, real applications will want to tune this
-            // value to their specific use case. There is a high likelihood that
-            // a larger read buffer will work better.
+            // 初始化一个 4KB 的缓冲区用于读取数据。
             buffer: BytesMut::with_capacity(4 * 1024),
         }
     }
 
-    /// Read a single `Frame` value from the underlying stream.
+    /// 异步读取数据并解析为 `Frame`。
     ///
-    /// The function waits until it has retrieved enough data to parse a frame.
-    /// Any data remaining in the read buffer after the frame has been parsed is
-    /// kept there for the next call to `read_frame`.
-    ///
-    /// # Returns
-    ///
-    /// On success, the received frame is returned. If the `TcpStream`
-    /// is closed in a way that doesn't break a frame in half, it returns
-    /// `None`. Otherwise, an error is returned.
+    /// # 返回
+    /// 如果成功，返回解析出的 `Frame`；如果远程关闭连接且没有剩余数据，则返回 `None`。
     pub async fn read_frame(&mut self) -> Result<Option<Frame>, MiniRedisConnectionError> {
         loop {
-            // Attempt to parse a frame from the buffered data. If enough data
-            // has been buffered, the frame is returned.
+            // 尝试从缓冲区解析一个帧，如果成功则返回帧。
             if let Some(frame) = self.parse_frame()? {
                 return Ok(Some(frame));
             }
 
-            // There is not enough buffered data to read a frame. Attempt to
-            // read more data from the socket.
-            //
-            // On success, the number of bytes is returned. `0` indicates "end
-            // of stream".
+            // 如果缓冲区中的数据不足以解析一个帧，则从流中读取更多数据。
             if 0 == self.stream.read_buf(&mut self.buffer).await? {
-                // The remote closed the connection. For this to be a clean
-                // shutdown, there should be no data in the read buffer. If
-                // there is, this means that the peer closed the socket while
-                // sending a frame.
+                // 远程关闭了连接。如果缓冲区中没有数据，则正常关闭，否则返回断开连接错误。
                 return if self.buffer.is_empty() {
                     Ok(None)
                 } else {
@@ -83,159 +65,162 @@ impl Connection {
         }
     }
 
-    /// Tries to parse a frame from the buffer. If the buffer contains enough
-    /// data, the frame is returned and the data removed from the buffer. If not
-    /// enough data has been buffered yet, `Ok(None)` is returned. If the
-    /// buffered data does not represent a valid frame, `Err` is returned.
+    /// 解析缓冲区中的数据为 `Frame`。
+    ///
+    /// # 返回
+    /// 如果成功，返回解析出的 `Frame`；如果数据不足，返回 `None`。
     fn parse_frame(&mut self) -> Result<Option<Frame>, MiniRedisConnectionError> {
-        // Cursor is used to track the "current" location in the
-        // buffer. Cursor also implements `Buf` from the `bytes` crate
-        // which provides a number of helpful utilities for working
-        // with bytes.
+        // 创建一个 Cursor 以便在缓冲区中移动和读取数据。
         let mut buf = Cursor::new(&self.buffer[..]);
 
-        // The first step is to check if enough data has been buffered to parse a single frame.
-        // This step is usually much faster than doing a full
-        // parse of the frame, and allows us to skip allocating data structures
-        // to hold the frame data unless we know the full frame has been received.
+        // 调用 Frame::check 检查缓冲区中是否有完整的帧。
         match Frame::check(&mut buf) {
             Ok(_) => {
-                // The `check` function will have advanced the cursor until the
-                // end of the frame. Since the cursor had position set to zero
-                // before `Frame::check` was called, we obtain the length of the
-                // frame by checking the cursor position.
+                // 获取当前 buf 的位置，表示帧的长度。
                 let len = buf.position() as usize;
 
-                // Reset the position to zero before passing the cursor to
-                // `Frame::parse`.
+                // 将 cursor 的位置重置为起始位置。
                 buf.set_position(0);
 
-                // Parse the frame from the buffer. This allocates the necessary
-                // structures to represent the frame and returns the frame value.
-                //
-                // If the encoded frame representation is invalid, an error is
-                // returned. This should terminate the **current** connection
-                // but should not impact any other connected client.
+                // 调用 Frame::parse 解析帧。
                 let frame = Frame::parse(&mut buf)?;
 
-                // Discard the parsed data from the read buffer.
-                //
-                // When `advance` is called on the read buffer, all of the data
-                // up to `len` is discarded. The details of how this works is
-                // left to `BytesMut`. This is often done by moving an internal
-                // cursor, but it may be done by reallocating and copying data.
+                // 移动缓冲区的起始位置，丢弃已经解析的数据。
                 self.buffer.advance(len);
-
-                // Return the parsed frame to the caller.
                 Ok(Some(frame))
             }
-            // There is not enough data present in the read buffer to parse a
-            // single frame. We must wait for more data to be received from the
-            // socket. Reading from the socket will be done in the statement
-            // after this `match`.
-            //
-            // We do not want to return `Err` from here as this "error" is an
-            // expected runtime condition.
+            // 如果数据不足以构成一个完整的帧，则返回 None。
             Err(MiniRedisParseError::Incomplete) => Ok(None),
-            // An error was encountered while parsing the frame. The connection
-            // is now in an invalid state. Returning `Err` from here will result
-            // in the connection being closed.
+            // 其他错误则直接返回。
             Err(e) => Err(e.into()),
         }
     }
 
-    /// Write a single `Frame` value to the underlying stream.
+    /// 异步写入 `Frame` 数据到 TCP 流。
     ///
-    /// The `Frame` value is written to the socket using the various `write_*`
-    /// functions provided by `AsyncWrite`. Calling these functions directly on
-    /// a `TcpStream` is **not** advised, as this will result in a large number of
-    /// syscalls. However, it is fine to call these functions on a *buffered*
-    /// write stream. The data will be written to the buffer. Once the buffer is
-    /// full, it is flushed to the underlying socket.
+    /// # 参数
+    /// * `frame` - 要写入的 `Frame` 数据。
+    ///
+    /// # 返回
+    /// 如果成功，返回 `Ok(())`。
     pub async fn write_frame(&mut self, frame: &Frame) -> Result<(), MiniRedisConnectionError> {
-        // Arrays are encoded by encoding each entry. All other frame types are
-        // considered literals. For now, mini-redis is not able to encode
-        // recursive frame structures. See below for more details.
+        // 根据帧的类型进行处理。
         match frame {
+            // 如果是数组类型
             Frame::Array(val) => {
-                // Encode the frame type prefix. For an array, it is `*`.
+                // 写入数组类型的标识符 `*`
                 self.stream.write_u8(b'*').await?;
 
-                // Encode the length of the array.
+                // 写入数组的长度
                 self.write_decimal(val.len() as u64).await?;
 
-                // Iterate and encode each entry in the array.
-                // todo ?
-                // for  in &**val {
+                // 遍历数组中的每个元素并写入
                 for entry in val {
                     self.write_value(entry).await?;
                 }
             }
-            // The frame type is a literal. Encode the value directly.
+            // 其他类型的帧
             _ => self.write_value(frame).await?,
         }
 
-        // Ensure the encoded frame is written to the socket. The calls above
-        // are to the buffered stream and writes. Calling `flush` writes the
-        // remaining contents of the buffer to the socket.
+        // 刷新缓冲区，将数据真正发送到网络中。
         self.stream.flush().await.map_err(|e| e.into())
     }
 
-    /// Write a frame literal to the stream
+    /// 根据 `Frame` 类型写入具体数据。
+    ///
+    /// # 参数
+    /// * `frame` - 要写入的 `Frame` 数据。
+    ///
+    /// # 返回
+    /// 如果成功，返回 `Ok(())`。
     async fn write_value(&mut self, frame: &Frame) -> Result<(), MiniRedisConnectionError> {
+        // 使用 match 语句根据 frame 的类型进行处理
         match frame {
+            // 写入简单字符串
             Frame::Simple(val) => {
+                // 写入简单字符串类型的标识符 `+`
                 self.stream.write_u8(b'+').await?;
+                // 写入字符串的内容
                 self.stream.write_all(val.as_bytes()).await?;
+                // 写入结尾标识 `\r\n`
                 self.stream.write_all(b"\r\n").await?;
             }
+            // 写入错误信息
             Frame::Error(val) => {
+                // 写入错误信息类型的标识符 `-`
                 self.stream.write_u8(b'-').await?;
+                // 写入错误信息的内容
                 self.stream.write_all(val.as_bytes()).await?;
+                // 写入结尾标识 `\r\n`
                 self.stream.write_all(b"\r\n").await?;
             }
+            // 写入整数
             Frame::Integer(val) => {
+                // 写入整数类型的标识符 `:`
                 self.stream.write_u8(b':').await?;
+                // 写入整数值
                 self.write_decimal(*val).await?;
             }
+            // 写入空值
             Frame::Null => {
+                // 写入表示空值的特殊标识 `$-1\r\n`
                 self.stream.write_all(b"$-1\r\n").await?;
             }
+            // 写入批量字符串
             Frame::Bulk(val) => {
+                // 获取字符串的长度
                 let len = val.len();
-
+                // 写入批量字符串类型的标识符 `$`
                 self.stream.write_u8(b'$').await?;
+                // 写入字符串的长度
                 self.write_decimal(len as u64).await?;
+                // 写入字符串的内容
                 self.stream.write_all(val).await?;
+                // 写入结尾标识 `\r\n`
                 self.stream.write_all(b"\r\n").await?;
             }
-            // Encoding an `Array` from within a value cannot be done using a
-            // recursive strategy. In general, async fns do not support
-            // recursion. Mini-redis has not needed to encode nested arrays yet,
-            // so for now it is skipped.
+            // 数组类型目前不支持递归写入，直接返回未实现错误
             Frame::Array(_val) => {
+                // 记录警告信息
                 warn!("unreachable code: recursive write_value: {:?}", _val);
+                // 返回未实现错误
                 return Err(MiniRedisParseError::Unimplemented.into());
             }
         }
 
+        // 所有写入操作成功后，返回 Ok(())
         Ok(())
     }
 
-    /// Write a decimal frame to the stream
+    /// 异步地将十进制数值写入 TCP 流。
+    ///
+    /// # 参数
+    /// * `val` - 要写入的十进制数值。
+    ///
+    /// # 返回
+    /// 如果成功，返回 `Ok(())`。
     async fn write_decimal(&mut self, val: u64) -> Result<(), MiniRedisConnectionError> {
+        // 引入 std::io::Write trait 以便使用其提供的写入方法。
         use std::io::Write;
 
-        // Convert the value to a string
+        // 创建一个长度为20的字节数组缓冲区，用于存储转换后的字符串。
         let mut buf = [0u8; 20];
+        // 将缓冲区包装成 Cursor，以便在其上执行写入操作。
         let mut buf = Cursor::new(&mut buf[..]);
 
+        // 将十进制数值转换为字符串并写入缓冲区。
+        // write! 宏用于格式化输出，将 val 作为十进制数值写入 buf 中。
         write!(&mut buf, "{}", val)?;
 
+        // 获取当前 Cursor 的位置，该位置表示写入的数据长度。
         let pos = buf.position() as usize;
+        // 将缓冲区中的有效内容（从起始位置到当前 Cursor 位置）写入到 TCP 流中。
         self.stream.write_all(&buf.get_ref()[..pos]).await?;
+        // 写入结尾标识符 `\r\n` 到 TCP 流中，以表示结束。
         self.stream.write_all(b"\r\n").await?;
 
+        // 返回 Ok(()) 表示写入操作成功完成。
         Ok(())
     }
 }
